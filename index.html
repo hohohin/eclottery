@@ -112,7 +112,7 @@
 
         const App = () => {
             // --- 状态定义 ---
-            const [themeTitle, setThemeTitle] = useState("乾坤天命大典");
+            const [themeTitle, setThemeTitle] = useState("神器封赏大典");
             
             const [candidates, setCandidates] = useState([]); // 当前候选人池
             const [allCandidates, setAllCandidates] = useState([]); // 备份的完整候选人名单（用于重置）
@@ -126,7 +126,7 @@
             
             // 抽奖过程状态
             const [isRolling, setIsRolling] = useState(false);
-            const [rollingName, setRollingName] = useState("开箱取宝");
+            const [rollingName, setRollingName] = useState("请先在榜单提名");
             
             // 弹窗提示状态
             const [prizeAlert, setPrizeAlert] = useState({ show: false, prizeName: "" });
