@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>神话抽奖系统</title>
+    
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- SheetJS for Excel handling -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        /* 引入衬线字体，更符合神话风格 */
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700;900&family=Noto+Sans+SC:wght@400;500;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            /* 深邃神话背景：玄青色渐变 */
+            background: radial-gradient(circle at 50% 0%, #2e1065 0%, #0f172a 60%, #020617 100%);
+            color: #e2e8f0;
+            min-height: 100vh;
+        }
+
+        /* 标题使用衬线体 */
+        .font-myth {
+            font-family: 'Noto Serif SC', serif;
+        }
+
+        /* 金色光晕动画 */
+        @keyframes gold-glow {
+            0%, 100% { box-shadow: 0 0 10px rgba(234, 179, 8, 0.2), inset 0 0 10px rgba(234, 179, 8, 0.1); }
+            50% { box-shadow: 0 0 20px rgba(234, 179, 8, 0.4), inset 0 0 15px rgba(234, 179, 8, 0.2); }
+        }
+
+        .gold-border {
+            border: 1px solid rgba(253, 224, 71, 0.3);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+        }
+
+        .scroll-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        .scroll-container::-webkit-scrollbar-track {
+            background: #1e293b; 
+        }
+        .scroll-container::-webkit-scrollbar-thumb {
+            background: #ca8a04; 
+            border-radius: 3px;
+        }
+        
+        /* 装饰性背景云雾 */
+        .fog-1 {
+            position: absolute;
+            top: -10%;
+            left: -10%;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(147, 51, 234, 0.15) 0%, rgba(0,0,0,0) 70%);
+            filter: blur(40px);
+            z-index: -1;
+            animation: float 20s infinite ease-in-out;
+        }
+        .fog-2 {
+            position: absolute;
+            bottom: -10%;
+            right: -10%;
+            width: 700px;
+            height: 700px;
+            background: radial-gradient(circle, rgba(234, 179, 8, 0.1) 0%, rgba(0,0,0,0) 70%);
+            filter: blur(50px);
+            z-index: -1;
+            animation: float 25s infinite ease-in-out reverse;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0); }
+            50% { transform: translate(30px, 20px); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        
+        // icon 组件
+        const Icons = {
+            Settings: () => <i data-lucide="settings" className="w-5 h-5"></i>,
+            Upload: () => <i data-lucide="upload" className="w-4 h-4"></i>,
+            Download: () => <i data-lucide="download" className="w-4 h-4"></i>,
+            Trophy: () => <i data-lucide="trophy" className="w-6 h-6 text-yellow-300"></i>,
+            User: () => <i data-lucide="user" className="w-4 h-4"></i>,
+            Save: () => <i data-lucide="save" className="w-4 h-4"></i>,
+            Gift: () => <i data-lucide="gift" className="w-5 h-5"></i>,
+            RotateCcw: () => <i data-lucide="rotate-ccw" className="w-4 h-4"></i>,
+            Trash2: () => <i data-lucide="trash-2" className="w-4 h-4"></i>,
+            Scroll: () => <i data-lucide="scroll" className="w-5 h-5"></i>
+        };
+
+        const App = () => {
+            // --- 状态定义 ---
+            const [themeTitle, setThemeTitle] = useState("乾坤天命大典");
+            
+            const [candidates, setCandidates] = useState([]); // 当前候选人池
+            const [allCandidates, setAllCandidates] = useState([]); // 备份的完整候选人名单（用于重置）
+            
+            const [prizes, setPrizes] = useState([]); // 奖品列表 {name, count, total}
+            const [winners, setWinners] = useState([]); // 中奖记录 {name, prizeName}
+            
+            const [currentPrizeIndex, setCurrentPrizeIndex] = useState(0);
+            const [isConfigured, setIsConfigured] = useState(false); // 是否已配置
+            const [showSettings, setShowSettings] = useState(false); // 显示设置弹窗
+            
+            // 抽奖过程状态
+            const [isRolling, setIsRolling] = useState(false);
+            const [rollingName, setRollingName] = useState("开箱取宝");
+            
+            // 弹窗提示状态
+            const [prizeAlert, setPrizeAlert] = useState({ show: false, prizeName: "" });
+            
+            // 临时设置状态（用于Form）
+            const [tempTitle, setTempTitle] = useState("");
+            
+            // 引用 lucide 图标
+            useEffect(() => {
+                lucide.createIcons();
+            }, [showSettings, winners, isConfigured, prizeAlert]);
+
+            // --- 辅助功能：生成并下载Excel模板 ---
+            const downloadTemplate = (type) => {
+                const wb = XLSX.utils.book_new();
+                let wsData = [];
+                let filename = "";
+
+                if (type === 'candidates') {
+                    wsData = [["姓名"], ["后羿"], ["嫦娥"], ["哪吒"]];
+                    filename = "抽奖名单模板.xlsx";
+                } else {
+                    wsData = [["奖品名称", "数量"], ["蟠桃", 1], ["金丹", 3], ["御酒", 5]];
+                    filename = "宝物设置模板.xlsx";
+                }
+
+                const ws = XLSX.utils.aoa_to_sheet(wsData);
+                XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+                XLSX.writeFile(wb, filename);
+            };
+
+            // --- 辅助功能：读取Excel ---
+            const handleFileUpload = (e, type) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const bstr = evt.target.result;
+                    const wb = XLSX.read(bstr, { type: 'binary' });
+                    const wsname = wb.SheetNames[0];
+                    const ws = wb.Sheets[wsname];
+                    const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                    
+                    // 去除表头 (第一行)
+                    const rows = data.slice(1).filter(r => r.length > 0);
+
+                    if (type === 'candidates') {
+                        // 假设第一列是名字
+                        const names = rows.map(r => r[0]).filter(n => n);
+                        setCandidates(names);
+                        setAllCandidates(names); // 备份完整名单
+                        alert(`已召集 ${names.length} 位仙友`);
+                    } else {
+                        // 假设第一列是奖品名，第二列是数量
+                        const loadedPrizes = rows.map(r => ({
+                            name: r[0],
+                            count: parseInt(r[1]) || 1,
+                            total: parseInt(r[1]) || 1
+                        })).filter(p => p.name);
+                        setPrizes(loadedPrizes);
+                        alert(`已入库 ${loadedPrizes.length} 种宝物`);
+                    }
+                };
+                reader.readAsBinaryString(file);
+            };
+
+            // --- 新增功能：导出中奖名单 ---
+            const downloadWinnersExcel = () => {
+                if (winners.length === 0) {
+                    alert("暂无获宝名单可下载");
+                    return;
+                }
+                
+                const data = [["中奖者", "所获宝物"]];
+                [...winners].reverse().forEach(w => {
+                    data.push([w.name, w.prizeName]);
+                });
+
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.aoa_to_sheet(data);
+                ws['!cols'] = [{ wch: 15 }, { wch: 20 }];
+
+                XLSX.utils.book_append_sheet(wb, ws, "夺宝榜");
+                
+                const date = new Date();
+                const timestamp = `${date.getFullYear()}${String(date.getMonth()+1).padStart(2,'0')}${String(date.getDate()).padStart(2,'0')}`;
+                XLSX.writeFile(wb, `中奖记录_${timestamp}.xlsx`);
+            };
+
+            // --- 核心逻辑：保存设置 ---
+            const saveSettings = () => {
+                if (candidates.length === 0 || prizes.length === 0) {
+                    alert("请确保上传了名单和宝物！");
+                    return;
+                }
+                setThemeTitle(tempTitle || themeTitle);
+                setIsConfigured(true);
+                setShowSettings(false);
+                
+                if (winners.length === 0) {
+                    setCurrentPrizeIndex(0);
+                    setRollingName("准备就绪");
+                    setTimeout(() => {
+                        setPrizeAlert({ show: true, prizeName: prizes[0].name });
+                    }, 500);
+                }
+            };
+
+            // --- 核心逻辑：重置整个活动 ---
+            const resetActivity = () => {
+                if (!window.confirm("确定要重置天命吗？\n\n这将清空所有记录，一切归零。")) {
+                    return;
+                }
+
+                if (allCandidates.length === 0) {
+                    alert("无法重置：请重新上传。");
+                    return;
+                }
+
+                setCandidates([...allCandidates]);
+                const resetPrizes = prizes.map(p => ({
+                    ...p,
+                    count: p.total
+                }));
+                setPrizes(resetPrizes);
+                setWinners([]);
+                setCurrentPrizeIndex(0);
+                setRollingName("准备就绪");
+                alert("已重置！");
+                setShowSettings(false);
+                setTimeout(() => {
+                    setPrizeAlert({ show: true, prizeName: resetPrizes[0].name });
+                }, 500);
+            };
+
+            // --- 核心逻辑：开始抽奖 ---
+            const startLottery = () => {
+                if (candidates.length === 0) {
+                    alert("众仙已尽数封赏！");
+                    return;
+                }
+                
+                let activePrizeIndex = currentPrizeIndex;
+                if (prizes[activePrizeIndex].count <= 0) {
+                    const nextIndex = prizes.findIndex((p, i) => i > activePrizeIndex && p.count > 0);
+                    if (nextIndex === -1) {
+                        alert("所有宝物已赐完！");
+                        setRollingName("大典结束");
+                        return;
+                    }
+                    activePrizeIndex = nextIndex;
+                    setCurrentPrizeIndex(nextIndex);
+                    setPrizeAlert({ show: true, prizeName: prizes[nextIndex].name });
+                    return; 
+                }
+
+                setIsRolling(true);
+                
+                const interval = setInterval(() => {
+                    const randomIdx = Math.floor(Math.random() * candidates.length);
+                    setRollingName(candidates[randomIdx]);
+                }, 50);
+
+                setTimeout(() => {
+                    finalizeWinner(interval, activePrizeIndex);
+                }, 3000);
+            };
+
+            // --- 核心逻辑：生成结果 ---
+            const finalizeWinner = (intervalId, prizeIndex) => {
+                clearInterval(intervalId);
+                const winnerIndex = Math.floor(Math.random() * candidates.length);
+                const winnerName = candidates[winnerIndex];
+                
+                setRollingName(winnerName);
+                setIsRolling(false);
+                
+                const currentPrize = prizes[prizeIndex];
+                const newRecord = { name: winnerName, prizeName: currentPrize.name };
+                
+                setWinners(prev => [newRecord, ...prev]);
+                
+                const newCandidates = [...candidates];
+                newCandidates.splice(winnerIndex, 1);
+                setCandidates(newCandidates);
+                
+                const newPrizes = [...prizes];
+                newPrizes[prizeIndex].count -= 1;
+                setPrizes(newPrizes);
+
+                if (newPrizes[prizeIndex].count === 0) {
+                    const nextIndex = newPrizes.findIndex((p, i) => i > prizeIndex && p.count > 0);
+                    if (nextIndex !== -1) {
+                         setTimeout(() => {
+                             setCurrentPrizeIndex(nextIndex);
+                             setPrizeAlert({ show: true, prizeName: newPrizes[nextIndex].name });
+                         }, 1500);
+                    } else {
+                        setTimeout(() => alert("所有宝物已赐完，大典圆满结束！"), 1000);
+                    }
+                }
+            };
+
+            const getCurrentPrizeName = () => {
+                if (!isConfigured) return "请先进行大典筹备（设置）";
+                if (prizes.length > 0 && currentPrizeIndex < prizes.length) {
+                    const p = prizes[currentPrizeIndex];
+                    if (p.count > 0) return `${p.name} (余 ${p.count})`;
+                    return "本轮宝物已罄";
+                }
+                return "大典结束";
+            };
+
+            return (
+                <div className="min-h-screen p-4 md:p-8 flex flex-col items-center relative overflow-hidden">
+                    {/* 装饰性背景 */}
+                    <div className="fog-1"></div>
+                    <div className="fog-2"></div>
+                    
+                    {/* 头部 */}
+                    <header className="w-full max-w-4xl flex justify-between items-center mb-10 z-10">
+                        <h1 className="text-4xl md:text-5xl font-myth font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-200 via-yellow-400 to-yellow-200 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] tracking-widest">
+                            {themeTitle}
+                        </h1>
+                        <button 
+                            onClick={() => { setTempTitle(themeTitle); setShowSettings(true); }}
+                            className="bg-slate-800/50 backdrop-blur-md p-3 rounded-full border border-yellow-600/50 text-yellow-500 hover:bg-yellow-900/30 hover:text-yellow-200 transition-all duration-300 group shadow-[0_0_15px_rgba(234,179,8,0.2)]"
+                            title="设置"
+                        >
+                            <div className="group-hover:rotate-90 transition-transform duration-700">
+                                <Icons.Settings />
+                            </div>
+                        </button>
+                    </header>
+
+                    <div className="w-full max-w-6xl flex flex-col md:flex-row gap-8 z-10">
+                        {/* 左侧：抽奖主区域 */}
+                        <div className="flex-1 flex flex-col items-center">
+                            
+                            {/* 奖品展示区 - 卷轴风格 */}
+                            <div className="mb-8 relative group w-full max-w-md">
+                                <div className="absolute inset-0 bg-gradient-to-r from-yellow-900/20 to-purple-900/20 blur-xl group-hover:blur-2xl transition-all"></div>
+                                <div className="relative bg-slate-900/40 backdrop-blur-md border border-yellow-500/30 px-8 py-4 rounded-lg flex flex-col items-center justify-center min-h-[100px] gold-border">
+                                    <p className="text-yellow-500/80 text-xs font-myth tracking-[0.2em] mb-2 uppercase">Current Treasure</p>
+                                    <div className="text-3xl font-myth font-bold text-yellow-100 flex items-center gap-3 drop-shadow-md">
+                                        <span className="text-yellow-500"><Icons.Gift /></span>
+                                        <span className="bg-clip-text text-transparent bg-gradient-to-r from-yellow-100 to-amber-200">
+                                            {!isConfigured ? "待筹备" : getCurrentPrizeName()}
+                                        </span>
+                                    </div>
+                                    {/* 装饰线条 */}
+                                    <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-yellow-500"></div>
+                                    <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-yellow-500"></div>
+                                    <div className="absolute bottom-0 left-0 w-2 h-2 border-b border-l border-yellow-500"></div>
+                                    <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-yellow-500"></div>
+                                </div>
+                            </div>
+
+                            {/* 滚轮模拟框 - 神坛风格 */}
+                            <div className="w-full max-w-lg aspect-video bg-black/40 rounded-lg shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col items-center justify-center border-y-4 border-yellow-900/50 relative overflow-hidden mb-10 backdrop-blur-sm">
+                                {/* 内部装饰圆环 */}
+                                <div className={`absolute w-[400px] h-[400px] border border-yellow-500/10 rounded-full ${isRolling ? 'animate-spin' : ''} transition-all duration-[3000ms]`}></div>
+                                <div className={`absolute w-[300px] h-[300px] border border-yellow-500/20 rounded-full ${isRolling ? 'animate-spin' : ''} transition-all duration-[2000ms] reverse`}></div>
+                                
+                                <div className="text-center z-10 relative">
+                                    <div className={`text-6xl md:text-7xl font-myth font-bold text-yellow-50 tracking-widest drop-shadow-[0_0_10px_rgba(234,179,8,0.5)] ${isRolling ? 'scale-110 blur-[1px]' : ''} transition-all duration-100`}>
+                                        {rollingName}
+                                    </div>
+                                    {!isRolling && candidates.length > 0 && isConfigured && (
+                                        <div className="text-xs text-yellow-500/50 mt-4 tracking-widest font-myth">— 待选仙家 {candidates.length} —</div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* 抽奖按钮 - 金丹/令牌风格 */}
+                            <button
+                                onClick={startLottery}
+                                disabled={!isConfigured || isRolling || (prizes[currentPrizeIndex]?.count || 0) <= 0}
+                                className={`
+                                    relative group overflow-hidden w-56 h-16 rounded-full text-xl font-myth font-bold tracking-widest shadow-2xl transition-all transform
+                                    ${!isConfigured || (prizes[currentPrizeIndex]?.count || 0) <= 0
+                                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed border border-slate-600' 
+                                        : isRolling 
+                                            ? 'bg-gradient-to-r from-amber-600 to-yellow-600 cursor-wait scale-95 text-yellow-100'
+                                            : 'bg-gradient-to-r from-yellow-700 via-yellow-600 to-amber-700 hover:from-yellow-600 hover:to-amber-600 text-white hover:-translate-y-1 shadow-[0_0_30px_rgba(234,179,8,0.4)] border border-yellow-400/30'
+                                    }
+                                `}
+                            >
+                                <span className="relative z-10 flex items-center justify-center gap-2">
+                                    {isRolling ? "宝箱开启中..." : "开启宝箱"}
+                                </span>
+                                {/* 按钮光效 */}
+                                {!isRolling && isConfigured && <div className="absolute inset-0 bg-white/10 group-hover:translate-x-full transition-transform duration-700 skew-x-12"></div>}
+                            </button>
+                        </div>
+
+                        {/* 右侧：中奖名单 - 竹简/石碑风格 */}
+                        <div className="w-full md:w-96 h-[600px] bg-slate-900/80 backdrop-blur-md rounded-xl border border-yellow-800/50 flex flex-col overflow-hidden shadow-2xl relative">
+                            {/* 顶部标题 */}
+                            <div className="bg-gradient-to-b from-yellow-900/90 to-slate-900/90 p-4 border-b border-yellow-800/30 flex items-center justify-between z-10">
+                                <div className="flex items-center gap-2 text-yellow-200">
+                                    <Icons.Scroll />
+                                    <span className="font-myth font-bold text-lg tracking-widest">封神榜</span>
+                                </div>
+                                {winners.length > 0 && (
+                                    <button 
+                                        onClick={downloadWinnersExcel}
+                                        className="text-xs text-yellow-600 hover:text-yellow-400 border border-yellow-800 hover:border-yellow-600 px-3 py-1 rounded transition-colors flex items-center gap-1"
+                                        title="下载榜单"
+                                    >
+                                        <Icons.Download /> 拓印
+                                    </button>
+                                )}
+                            </div>
+                            
+                            {/* 列表内容 */}
+                            <div className="flex-1 overflow-y-auto p-4 space-y-3 scroll-container relative">
+                                {winners.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-full text-slate-600 space-y-4">
+                                        <div className="w-16 h-16 border-2 border-slate-700 rounded-full flex items-center justify-center text-slate-700">
+                                            <span className="font-myth text-2xl">空</span>
+                                        </div>
+                                        <span className="font-myth text-sm">虚位以待</span>
+                                    </div>
+                                ) : (
+                                    winners.map((win, idx) => (
+                                        <div key={idx} className="flex items-center justify-between p-3 bg-slate-800/50 rounded border border-yellow-900/30 hover:border-yellow-600/50 transition-colors animate-[fadeIn_0.5s_ease-out] group">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-yellow-700 to-yellow-900 text-yellow-100 flex items-center justify-center font-myth font-bold text-sm shadow-inner border border-yellow-600/50">
+                                                    {winners.length - idx}
+                                                </div>
+                                                <span className="font-myth font-bold text-yellow-100 text-lg group-hover:text-white transition-colors">{win.name}</span>
+                                            </div>
+                                            <span className="text-xs font-medium text-yellow-500 bg-yellow-900/20 px-2 py-1 rounded border border-yellow-700/30">
+                                                {win.prizeName}
+                                            </span>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                            
+                            {/* 底部统计 */}
+                            <div className="p-3 bg-slate-950/50 border-t border-yellow-900/30 text-center text-xs text-slate-500 font-myth tracking-wider">
+                                共封赏 {winners.length} 位仙家
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 设置弹窗 Modal - 典籍风格 */}
+                    {showSettings && (
+                        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+                            <div className="bg-slate-900 border border-yellow-700/50 rounded-xl w-full max-w-lg shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden animate-[scaleIn_0.3s_ease-out] flex flex-col max-h-[90vh] text-slate-200">
+                                <div className="p-6 border-b border-yellow-900/50 bg-slate-950/30">
+                                    <h2 className="text-xl font-myth font-bold text-yellow-500 flex items-center gap-2">
+                                        <Icons.Settings /> 大典筹备
+                                    </h2>
+                                </div>
+                                
+                                <div className="p-6 space-y-6 overflow-y-auto scroll-container">
+                                    {/* 主题设置 */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-yellow-600/80 mb-2 font-myth">大典名号</label>
+                                        <input 
+                                            type="text" 
+                                            value={tempTitle}
+                                            onChange={(e) => setTempTitle(e.target.value)}
+                                            className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-yellow-100 focus:ring-1 focus:ring-yellow-600 focus:border-yellow-600 outline-none transition placeholder-slate-600"
+                                            placeholder="请输入活动标题"
+                                        />
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {/* 候选人设置 */}
+                                        <div className="p-4 bg-slate-800/50 rounded border border-slate-700">
+                                            <div className="flex items-center justify-between mb-3">
+                                                <span className="font-bold text-slate-300 font-myth">仙家名录</span>
+                                                <span className="text-xs bg-slate-700 px-2 py-0.5 rounded text-slate-400">{allCandidates.length || 0}人</span>
+                                            </div>
+                                            <div className="flex flex-col gap-2">
+                                                <button onClick={() => downloadTemplate('candidates')} className="flex items-center justify-center gap-1 text-xs text-slate-400 hover:text-yellow-400 py-1.5 border border-slate-600 rounded hover:border-yellow-600 transition">
+                                                    <Icons.Download /> 获取空名册
+                                                </button>
+                                                <label className="cursor-pointer flex items-center justify-center gap-1 text-xs text-slate-900 bg-yellow-600 hover:bg-yellow-500 py-1.5 rounded transition shadow-sm font-bold">
+                                                    <Icons.Upload /> 呈递名册
+                                                    <input type="file" accept=".xlsx, .xls" className="hidden" onChange={(e) => handleFileUpload(e, 'candidates')} />
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        {/* 奖项设置 */}
+                                        <div className="p-4 bg-slate-800/50 rounded border border-slate-700">
+                                            <div className="flex items-center justify-between mb-3">
+                                                <span className="font-bold text-slate-300 font-myth">宝物库</span>
+                                                <span className="text-xs bg-slate-700 px-2 py-0.5 rounded text-slate-400">{prizes.length}项</span>
+                                            </div>
+                                            <div className="flex flex-col gap-2">
+                                                <button onClick={() => downloadTemplate('prizes')} className="flex items-center justify-center gap-1 text-xs text-slate-400 hover:text-yellow-400 py-1.5 border border-slate-600 rounded hover:border-yellow-600 transition">
+                                                    <Icons.Download /> 获取宝物册
+                                                </button>
+                                                <label className="cursor-pointer flex items-center justify-center gap-1 text-xs text-slate-900 bg-yellow-600 hover:bg-yellow-500 py-1.5 rounded transition shadow-sm font-bold">
+                                                    <Icons.Upload /> 充实宝库
+                                                    <input type="file" accept=".xlsx, .xls" className="hidden" onChange={(e) => handleFileUpload(e, 'prizes')} />
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 重置区域 */}
+                                    {isConfigured && (
+                                        <div className="pt-4 border-t border-slate-800">
+                                            <button 
+                                                onClick={resetActivity}
+                                                className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-red-900/50 text-red-500 rounded hover:bg-red-950/30 transition text-sm"
+                                            >
+                                                <Icons.RotateCcw /> 重置乾坤（全部归零）
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="p-4 bg-slate-950/30 border-t border-yellow-900/50 flex justify-end gap-3">
+                                    <button 
+                                        onClick={() => setShowSettings(false)}
+                                        className="px-4 py-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition text-sm font-medium"
+                                    >
+                                        暂退
+                                    </button>
+                                    <button 
+                                        onClick={saveSettings}
+                                        className="px-6 py-2 bg-gradient-to-r from-yellow-700 to-amber-600 hover:from-yellow-600 hover:to-amber-500 text-white rounded shadow-[0_0_15px_rgba(234,179,8,0.3)] transition text-sm font-bold font-myth flex items-center gap-2"
+                                    >
+                                        <Icons.Save /> 确认并生效
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 奖项切换全屏弹窗 - 神谕风格 */}
+                    {prizeAlert.show && (
+                        <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center z-[60] animate-[fadeIn_0.5s]">
+                            <div className="relative bg-slate-900 border-2 border-yellow-600/50 rounded-lg p-10 max-w-sm w-full text-center shadow-[0_0_100px_rgba(234,179,8,0.3)] transform animate-[bounceIn_0.8s]">
+                                {/* 装饰角纹 */}
+                                <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-yellow-500"></div>
+                                <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-yellow-500"></div>
+                                <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-yellow-500"></div>
+                                <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-yellow-500"></div>
+
+                                <div className="w-20 h-20 bg-gradient-to-br from-yellow-900 to-slate-900 text-yellow-500 rounded-full flex items-center justify-center mx-auto mb-6 border border-yellow-600 shadow-[0_0_20px_rgba(234,179,8,0.2)]">
+                                    <Icons.Gift size={40} />
+                                </div>
+                                <h3 className="text-yellow-600 font-myth text-lg mb-2 tracking-widest">天降祥瑞</h3>
+                                <div className="text-4xl font-myth font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-200 via-amber-400 to-yellow-200 mb-8 drop-shadow-sm">
+                                    {prizeAlert.prizeName}
+                                </div>
+                                <button 
+                                    onClick={() => setPrizeAlert({ ...prizeAlert, show: false })}
+                                    className="w-full py-3 bg-gradient-to-r from-red-900 to-red-800 hover:from-red-800 hover:to-red-700 text-red-100 rounded font-bold font-myth shadow-lg border border-red-700 transition transform hover:scale-105 tracking-widest"
+                                >
+                                    领旨
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+    
+    <style>
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes scaleIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes bounceIn {
+            0% { transform: scale(0.8); opacity: 0; }
+            50% { transform: scale(1.05); opacity: 1; }
+            100% { transform: scale(1); }
+        }
+        i { display: inline-block; vertical-align: middle; }
+    </style>
+</body>
+</html>
